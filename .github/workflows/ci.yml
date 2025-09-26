@@ -75,8 +75,9 @@ jobs:
 
       - name: Define image coords
         run: |
-          echo "IMAGE=ghcr.io/${{ github.repository }}" >> $GITHUB_ENV
-          echo "TAG=${{ github.sha }}" >> $GITHUB_ENV
+          REPO_LC=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/${REPO_LC}" >> $GITHUB_ENV
+          echo "TAG=${GITHUB_SHA}" >> $GITHUB_ENV
 
       - name: Login GHCR
         if: ${{ github.event_name != 'pull_request' }}
