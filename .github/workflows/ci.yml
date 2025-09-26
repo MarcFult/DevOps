@@ -1,0 +1,74 @@
+name: CI – Build, Test, Docker (GHCR)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test-docker:
+    runs-on: self-hosted
+
+    permissions:
+      contents: read
+      packages: write # needed to push to GHCR
+      id-token: write # optional (provenance/signing)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Make wrapper executable (normalize CRLF just in case)
+        run: |
+          sed -i 's/\r$//' gradlew || true
+          chmod +x gradlew
+
+      - name: Build with tests (fat JAR via bootJar)
+        run: ./gradlew --no-daemon clean test bootJar
+
+      - name: Upload fat JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload test report (HTML)
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: build/reports/tests/test/**
+          retention-days: 7
+
+      - name: Set image coordinates
+        id: coords
+        run: |
+          echo "IMAGE=ghcr.io/${{ github.repository }}" >> $GITHUB_ENV
+          echo "TAG=${{ github.sha }}" >> $GITHUB_ENV
+
+      - name: Log in to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
+
+      - name: Push Docker image
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:latest"
