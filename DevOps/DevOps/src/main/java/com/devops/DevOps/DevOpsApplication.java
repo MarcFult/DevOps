@@ -10,4 +10,7 @@ public class DevOpsApplication {
 		SpringApplication.run(DevOpsApplication.class, args);
 	}
 
+
+
 }
+
