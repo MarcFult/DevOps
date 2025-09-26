@@ -15,6 +15,11 @@ jobs:
       packages: write
       id-token: write
 
+    # ✅ Put Gradle’s user home in the workspace (always writable)
+    env:
+      PROJECT_DIR: DevOps/DevOps # <-- adjust if different, or keep your detect step
+      GRADLE_USER_HOME: ${{ github.workspace }}/.gradle
+
     steps:
       - uses: actions/checkout@v4
 
@@ -22,30 +27,8 @@ jobs:
         run: |
           pwd
           ls -la
-          echo "--- search for gradlew up to depth 4 ---"
-          find . -maxdepth 4 -name gradlew -print || true
-          echo "--- search for build.gradle(.kts) ---"
-          find . -maxdepth 4 -regex '.*build\.gradle\(\\.kts\)?' -print || true
-
-      # Detect the project directory that contains gradlew (or build.gradle(.kts) as fallback)
-      - name: Detect project directory
-        id: detect
-        shell: bash
-        run: |
-          set -e
-          hit="$(git ls-files | grep -E '(^|/)gradlew$' | head -n1 || true)"
-          if [ -n "$hit" ]; then
-            dir="$(dirname "$hit")"
-          else
-            hit="$(git ls-files | grep -E '(^|/)build\.gradle(\.kts)?$' | head -n1 || true)"
-            dir="$(dirname "$hit")"
-          fi
-          if [ -z "$dir" ]; then
-            echo "No project directory found." >&2
-            exit 1
-          fi
-          echo "PROJECT_DIR=$dir" >> "$GITHUB_ENV"
-          echo "Detected PROJECT_DIR=$dir"
+          echo "PROJECT_DIR=${PROJECT_DIR}"
+          ls -la "${PROJECT_DIR}"
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -54,23 +37,27 @@ jobs:
           java-version: "21"
           cache: gradle
 
+      # (Optional) make sure the folder exists and is writable
+      - name: Prepare Gradle user home
+        run: |
+          mkdir -p "$GRADLE_USER_HOME"
+          chmod -R u+rwX "$GRADLE_USER_HOME"
+
       - name: Make wrapper executable (if present)
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ -f gradlew ]; then
             sed -i 's/\r$//' gradlew || true
             chmod +x gradlew
-          else
-            echo "gradlew not found; will use 'gradle' CLI"
           fi
 
       - name: Build with tests (fat JAR)
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ -f ./gradlew ]; then
-            ./gradlew --no-daemon clean test bootJar
+            ./gradlew --no-daemon -g "$GRADLE_USER_HOME" clean test bootJar
           else
-            gradle --no-daemon clean test bootJar
+            gradle    --no-daemon -g "$GRADLE_USER_HOME" clean test bootJar
           fi
 
       - name: Upload fat JAR
