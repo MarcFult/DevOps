@@ -114,6 +114,15 @@ jobs:
           # optional: cleanup dangling images
           docker image prune -f || true
 
+      - name: Free host port 8080
+        run: |
+          set -euxo pipefail
+          IN_USE=$(docker ps -q --filter "publish=8080")
+          if [ -n "$IN_USE" ]; then
+            echo "Killing containers using host port 8080: $IN_USE"
+            docker rm -f $IN_USE || true  
+          fi
+
       - name: Start container (detached, restart policy, named)
         run: |
           set -euxo pipefail
