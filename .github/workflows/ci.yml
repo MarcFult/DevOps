@@ -1,4 +1,4 @@
-name: CI – Build, Test, Docker
+name: CI – Build, Test, Deploy, Integrate, Push
 
 on:
   push:
@@ -15,10 +15,18 @@ jobs:
       packages: write
       id-token: write
 
-    # ✅ Put Gradle’s user home in the workspace (always writable)
     env:
-      PROJECT_DIR: DevOps/DevOps # <-- adjust if different, or keep your detect step
+      PROJECT_DIR: DevOps/DevOps
       GRADLE_USER_HOME: ${{ github.workspace }}/.gradle
+
+      # ---- Deployment & Image coords ----
+      SERVICE_NAME: devops-app
+      CONTAINER_NAME: devops-app
+      APP_PORT: "8080"
+      HEALTH_URL: "http://localhost:8080/endpoint" # <-- Change if your endpoint differs
+      EXPECTED_FILE: "integration/expected.txt" # <-- Place expected output here
+
+      TEAM_REGISTRY: 10.0.40.193:5000
 
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +36,8 @@ jobs:
           pwd
           ls -la
           echo "PROJECT_DIR=${PROJECT_DIR}"
-          ls -la "${PROJECT_DIR}"
+          ls -la "${PROJECT_DIR}" || true
+          ls -la integration || true
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -37,7 +46,6 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      # (Optional) make sure the folder exists and is writable
       - name: Prepare Gradle user home
         run: |
           mkdir -p "$GRADLE_USER_HOME"
@@ -76,10 +84,13 @@ jobs:
       - name: Define image coords
         run: |
           REPO_LC=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
-          echo "IMAGE=ghcr.io/${REPO_LC}" >> $GITHUB_ENV
+          echo "REPO_LC=${REPO_LC}" >> $GITHUB_ENV
+          echo "IMAGE_GHCR=ghcr.io/${REPO_LC}" >> $GITHUB_ENV
+          echo "IMAGE_LOCAL=${REPO_LC}" >> $GITHUB_ENV
           echo "TAG=${GITHUB_SHA}" >> $GITHUB_ENV
+          echo "IMAGE_TEAM=${TEAM_REGISTRY}/${REPO_LC}" >> $GITHUB_ENV
 
-      - name: Login GHCR
+      - name: Login GHCR (optional)
         if: ${{ github.event_name != 'pull_request' }}
         uses: docker/login-action@v3
         with:
@@ -87,12 +98,91 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Docker image (from project dir)
+      - name: Build Docker image
         working-directory: ${{ env.PROJECT_DIR }}
-        run: docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
+        run: |
+          docker build -t "$IMAGE_LOCAL:$TAG" -t "$IMAGE_LOCAL:latest" .
+          # (Optionally tag GHCR for debugging)
+          docker tag "$IMAGE_LOCAL:$TAG" "$IMAGE_GHCR:$TAG"
+          docker tag "$IMAGE_LOCAL:latest" "$IMAGE_GHCR:latest"
 
-      - name: Push Docker image
+      # ---------- Deploy on team VM ----------
+      - name: Stop old container & cleanup
+        run: |
+          set -euxo pipefail
+          docker rm -f "$CONTAINER_NAME" || true
+          # optional: cleanup dangling images
+          docker image prune -f || true
+
+      - name: Start container (detached, restart policy, named)
+        run: |
+          set -euxo pipefail
+          docker run -d \
+            --name "$CONTAINER_NAME" \
+            --restart unless-stopped \
+            -p "${APP_PORT}:8080" \
+            "$IMAGE_LOCAL:$TAG"
+
+      - name: Wait for app to become ready
+        timeout-minutes: 3
+        run: |
+          set -e
+          echo "Waiting for ${HEALTH_URL} ..."
+          for i in $(seq 1 60); do
+            if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
+              echo "Service is up."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Service did not become ready in time."
+          exit 1
+
+      # ---------- Simple integration test ----------
+      - name: Integration test (compare endpoint to expected)
+        run: |
+          set -e
+          test -f "$EXPECTED_FILE" || { echo "Missing $EXPECTED_FILE"; exit 1; }
+
+          EXPECTED="$(cat "$EXPECTED_FILE")"
+          ACTUAL="$(curl -fsS "$HEALTH_URL")"
+
+          if [ "$EXPECTED" = "$ACTUAL" ]; then
+            echo "Integration test PASSED"
+          else
+            echo "Integration test FAILED"
+            echo "----- EXPECTED -----"
+            printf "%s\n" "$EXPECTED"
+            echo "----- ACTUAL -------"
+            printf "%s\n" "$ACTUAL"
+            exit 1
+          fi
+
+      # ---------- Tag & Push only AFTER tests passed ----------
+      - name: Tag for team registry
         if: ${{ github.event_name != 'pull_request' }}
         run: |
-          docker push "$IMAGE:$TAG"
-          docker push "$IMAGE:latest"
+          set -euxo pipefail
+          docker tag "$IMAGE_LOCAL:$TAG" "$IMAGE_TEAM:$TAG"
+          docker tag "$IMAGE_LOCAL:latest" "$IMAGE_TEAM:latest"
+
+      - name: Push to team registry (insecure registry preconfigured)
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set -euxo pipefail
+          docker push "$IMAGE_TEAM:$TAG"
+          docker push "$IMAGE_TEAM:latest"
+
+      - name: Also push to GHCR (optional)
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set -euxo pipefail
+          docker push "$IMAGE_GHCR:$TAG"
+          docker push "$IMAGE_GHCR:latest"
+
+      # ---------- Helpful diagnostics on failure ----------
+      - name: Dump container logs on failure
+        if: ${{ failure() }}
+        run: |
+          echo "==== Container logs (${CONTAINER_NAME}) ===="
+          docker logs "$CONTAINER_NAME" || true
