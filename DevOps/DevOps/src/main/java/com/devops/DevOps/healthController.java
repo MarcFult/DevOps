@@ -1,4 +1,4 @@
-package com.devOps.DevOps;
+package com.devops.DevOps;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
