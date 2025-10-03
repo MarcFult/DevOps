@@ -21,7 +21,7 @@ jobs:
 
       # ---- Deployment & Image coords ----
       SERVICE_NAME: devops-app
-      CONTAINER_NAME: devops-app
+      CONTAINER_NAME: unicorn-fart
       APP_PORT: "8080"
       HEALTH_URL: "http://localhost:8080/endpoint" # <-- Change if your endpoint differs
       EXPECTED_FILE: "integration/expected.txt" # <-- Place expected output here
