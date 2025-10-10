@@ -106,28 +106,15 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -euxo pipefail
-          # With sonar-project.properties in the project, we just need to pass env vars:
+          mkdir -p .sonar-cache
           docker run --rm \
             --user "$(id -u):$(id -g)" \
             -e SONAR_HOST_URL="$SONAR_HOST_URL" \
             -e SONAR_TOKEN="$SONAR_TOKEN" \
             -e SONAR_PROJECT_KEY="$SONAR_PROJECT_KEY" \
+            -e SONAR_USER_HOME="/usr/src/.sonar-cache" \
             -v "$PWD:/usr/src" \
             sonarsource/sonar-scanner-cli:latest
-
-          # If you don't want a properties file, switch to the block below:
-          # docker run --rm \
-          #   --user "$(id -u):$(id -g)" \
-          #   -e SONAR_HOST_URL="$SONAR_HOST_URL" \
-          #   -e SONAR_TOKEN="$SONAR_TOKEN" \
-          #   -e SONAR_SCANNER_OPTS="-Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-          #                           -Dsonar.sources=src/main/java \
-          #                           -Dsonar.tests=src/test/java \
-          #                           -Dsonar.java.binaries=build/classes/java/main \
-          #                           -Dsonar.java.test.binaries=build/classes/java/test \
-          #                           -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml" \
-          #   -v "$PWD:/usr/src" \
-          #   sonarsource/sonar-scanner-cli:latest
 
       - name: Define image coords
         run: |
