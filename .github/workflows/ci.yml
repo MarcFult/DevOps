@@ -120,7 +120,7 @@ jobs:
           IN_USE=$(docker ps -q --filter "publish=8080")
           if [ -n "$IN_USE" ]; then
             echo "Killing containers using host port 8080: $IN_USE"
-            docker rm -f $IN_USE || true  
+            docker rm -f $IN_USE || true
           fi
 
       - name: Start container (detached, restart policy, named)
@@ -172,7 +172,7 @@ jobs:
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           set -euxo pipefail
-          docker tag "$IMAGE_LOCAL:$TAG" "$IMAGE_TEAM:$TAG"
+          docker tag "$IMAGE_LOCAL:$TAG"   "$IMAGE_TEAM:$TAG"
           docker tag "$IMAGE_LOCAL:latest" "$IMAGE_TEAM:latest"
 
       - name: Push to team registry (insecure registry preconfigured)
@@ -189,9 +189,37 @@ jobs:
           docker push "$IMAGE_GHCR:$TAG"
           docker push "$IMAGE_GHCR:latest"
 
-      # ---------- Helpful diagnostics on failure ----------
+      # ---------- Registry availability checks ----------
+      - name: Verify repository appears in registry catalog
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set -euxo pipefail
+          # Example response: {"repositories":["owner/repo", ...]}
+          CATALOG="$(curl -fsS "http://${TEAM_REGISTRY}/v2/_catalog")"
+          echo "$CATALOG"
+          echo "$CATALOG" | grep -q "\"${REPO_LC}\"" \
+            || { echo "Repo ${REPO_LC} not found in registry catalog"; exit 1; }
+
+      - name: Verify pushed tags exist in registry
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set -euxo pipefail
+          # Example: {"name":"owner/repo","tags":["latest","<sha>"]}
+          TAGS_JSON="$(curl -fsS "http://${TEAM_REGISTRY}/v2/${REPO_LC}/tags/list")"
+          echo "$TAGS_JSON"
+          echo "$TAGS_JSON" | grep -q "\"${TAG}\"" \
+            || { echo "Tag ${TAG} not found in registry"; exit 1; }
+          echo "$TAGS_JSON" | grep -q "\"latest\"" \
+            || { echo "Tag latest not found in registry"; exit 1; }
+
+      # ---------- Helpful diagnostics & cleanup ----------
       - name: Dump container logs on failure
         if: ${{ failure() }}
         run: |
           echo "==== Container logs (${CONTAINER_NAME}) ===="
           docker logs "$CONTAINER_NAME" || true
+
+      - name: Stop container (always)
+        if: ${{ always() }}
+        run: |
+          docker stop "$CONTAINER_NAME" || true
