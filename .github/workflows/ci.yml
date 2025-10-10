@@ -39,6 +39,19 @@ jobs:
           ls -la "${PROJECT_DIR}" || true
           ls -la integration || true
 
+      # Fail fast if Sonar secrets are missing (keeps values masked)
+      - name: Validate Sonar secrets exist
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          set -e
+          : "${SONAR_HOST_URL:?Missing SONAR_HOST_URL}"
+          : "${SONAR_PROJECT_KEY:?Missing SONAR_PROJECT_KEY}"
+          : "${SONAR_TOKEN:?Missing SONAR_TOKEN}"
+          echo "Sonar secrets are present."
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -106,13 +119,14 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           set -euxo pipefail
-          mkdir -p .sonar-cache
+          mkdir -p .sonar-cache .sonar-tmp
           docker run --rm \
             --user "$(id -u):$(id -g)" \
             -e SONAR_HOST_URL="$SONAR_HOST_URL" \
             -e SONAR_TOKEN="$SONAR_TOKEN" \
             -e SONAR_PROJECT_KEY="$SONAR_PROJECT_KEY" \
             -e SONAR_USER_HOME="/usr/src/.sonar-cache" \
+            -e SONAR_SCANNER_OPTS="-Djava.io.tmpdir=/usr/src/.sonar-tmp" \
             -v "$PWD:/usr/src" \
             sonarsource/sonar-scanner-cli:latest
 
@@ -156,6 +170,12 @@ jobs:
             echo "Killing containers using host port 8080: $IN_USE"
             docker rm -f $IN_USE || true
           fi
+
+      # Make sure the expected.txt exists (delete this step if you keep the file in repo)
+      - name: Prepare test fixtures (expected.txt)
+        run: |
+          mkdir -p integration
+          [ -f "$EXPECTED_FILE" ] || echo "OK" > "$EXPECTED_FILE"
 
       - name: Start container (detached, restart policy, named)
         run: |
