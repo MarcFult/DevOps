@@ -81,6 +81,54 @@ jobs:
           name: test-report
           path: ${{ env.PROJECT_DIR }}/build/reports/tests/test/**
 
+      # ---------- Coverage + SonarQube ----------
+      - name: Generate JaCoCo coverage report
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          if [ -f ./gradlew ]; then
+            ./gradlew --no-daemon -g "$GRADLE_USER_HOME" jacocoTestReport
+          else
+            gradle    --no-daemon -g "$GRADLE_USER_HOME" jacocoTestReport
+          fi
+          test -f build/reports/jacoco/test/jacocoTestReport.xml
+
+      - name: Upload coverage report (HTML)
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: ${{ env.PROJECT_DIR }}/build/reports/jacoco/test/html/**
+
+      - name: SonarQube scan (Docker CLI)
+        working-directory: ${{ env.PROJECT_DIR }}
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          set -euxo pipefail
+          # With sonar-project.properties in the project, we just need to pass env vars:
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e SONAR_HOST_URL="$SONAR_HOST_URL" \
+            -e SONAR_TOKEN="$SONAR_TOKEN" \
+            -e SONAR_PROJECT_KEY="$SONAR_PROJECT_KEY" \
+            -v "$PWD:/usr/src" \
+            sonarsource/sonar-scanner-cli:latest
+
+          # If you don't want a properties file, switch to the block below:
+          # docker run --rm \
+          #   --user "$(id -u):$(id -g)" \
+          #   -e SONAR_HOST_URL="$SONAR_HOST_URL" \
+          #   -e SONAR_TOKEN="$SONAR_TOKEN" \
+          #   -e SONAR_SCANNER_OPTS="-Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+          #                           -Dsonar.sources=src/main/java \
+          #                           -Dsonar.tests=src/test/java \
+          #                           -Dsonar.java.binaries=build/classes/java/main \
+          #                           -Dsonar.java.test.binaries=build/classes/java/test \
+          #                           -Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml" \
+          #   -v "$PWD:/usr/src" \
+          #   sonarsource/sonar-scanner-cli:latest
+
       - name: Define image coords
         run: |
           REPO_LC=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
@@ -111,7 +159,6 @@ jobs:
         run: |
           set -euxo pipefail
           docker rm -f "$CONTAINER_NAME" || true
-          # optional: cleanup dangling images
           docker image prune -f || true
 
       - name: Free host port 8080
@@ -194,7 +241,6 @@ jobs:
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           set -euxo pipefail
-          # Example response: {"repositories":["owner/repo", ...]}
           CATALOG="$(curl -fsS "http://${TEAM_REGISTRY}/v2/_catalog")"
           echo "$CATALOG"
           echo "$CATALOG" | grep -q "\"${REPO_LC}\"" \
@@ -204,7 +250,6 @@ jobs:
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           set -euxo pipefail
-          # Example: {"name":"owner/repo","tags":["latest","<sha>"]}
           TAGS_JSON="$(curl -fsS "http://${TEAM_REGISTRY}/v2/${REPO_LC}/tags/list")"
           echo "$TAGS_JSON"
           echo "$TAGS_JSON" | grep -q "\"${TAG}\"" \
