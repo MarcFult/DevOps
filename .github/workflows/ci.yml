@@ -303,21 +303,6 @@ jobs:
           done
           echo "Docs did not become ready in time."
           exit 1
-
-      # Extra debug if anything fails after this point
-      - name: Debug docs container on failure
-        if: ${{ failure() }}
-        run: |
-          echo "=== Files inside running docs container ==="
-          docker exec "$DOCS_CONTAINER_NAME" sh -c 'ls -la /usr/share/nginx/html || true'
-          echo "=== Nginx error log (if present) ==="
-          docker exec "$DOCS_CONTAINER_NAME" sh -c 'cat /var/log/nginx/error.log || true'
-
-      - name: Check MkDocs site content
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          echo "Files in site/:"
-          ls -la site/
     
       # ---------- Tag & Push APP after tests passed ----------
       - name: Tag for team registry (app)
