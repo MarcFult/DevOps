@@ -1,0 +1,9 @@
+# DevOps/DevOps/.dockerignore
+.git
+.github
+.gradle
+.sonar*
+build
+site
+node_modules
+*.log
