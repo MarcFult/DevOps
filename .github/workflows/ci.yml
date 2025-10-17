@@ -19,7 +19,7 @@ jobs:
       PROJECT_DIR: DevOps/DevOps
       GRADLE_USER_HOME: ${{ github.workspace }}/.gradle
 
-      # ---- Deployment & Image coords ----
+      # ---- App coords ----
       SERVICE_NAME: devops-app
       CONTAINER_NAME: unicorn-fart
       APP_PORT: "8080"
@@ -27,6 +27,11 @@ jobs:
       EXPECTED_FILE: "integration/expected.txt" # <-- Place expected output here
 
       TEAM_REGISTRY: 10.0.40.193:5000
+
+      # ---- Docs coords ----
+      DOCS_CONTAINER_NAME: devops-docs
+      DOCS_HOST_PORT: "8081" # must differ from APP_PORT
+      DOCS_HEALTH_URL: "http://localhost:8081/index.html"
 
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +43,9 @@ jobs:
           echo "PROJECT_DIR=${PROJECT_DIR}"
           ls -la "${PROJECT_DIR}" || true
           ls -la integration || true
+          ls -la docs || true
+          test -f mkdocs.yml && echo "mkdocs.yml present" || echo "mkdocs.yml missing"
+          test -f Dockerfile.docs && echo "Dockerfile.docs present" || echo "Dockerfile.docs missing"
 
       # Fail fast if Sonar secrets are missing (keeps values masked)
       - name: Validate Sonar secrets exist
@@ -126,7 +134,7 @@ jobs:
             -v "$PWD:/usr/src" \
             sonarsource/sonar-scanner-cli:latest
 
-      - name: Define image coords
+      - name: Define image coords (app + docs)
         run: |
           REPO_LC=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
           echo "REPO_LC=${REPO_LC}" >> $GITHUB_ENV
@@ -134,6 +142,11 @@ jobs:
           echo "IMAGE_LOCAL=${REPO_LC}" >> $GITHUB_ENV
           echo "TAG=${GITHUB_SHA}" >> $GITHUB_ENV
           echo "IMAGE_TEAM=${TEAM_REGISTRY}/${REPO_LC}" >> $GITHUB_ENV
+
+          # Docs image names (-docs suffix)
+          echo "IMAGE_GHCR_DOCS=ghcr.io/${REPO_LC}-docs" >> $GITHUB_ENV
+          echo "IMAGE_LOCAL_DOCS=${REPO_LC}-docs" >> $GITHUB_ENV
+          echo "IMAGE_TEAM_DOCS=${TEAM_REGISTRY}/${REPO_LC}-docs" >> $GITHUB_ENV
 
       - name: Login GHCR (optional)
         if: ${{ github.event_name != 'pull_request' }}
@@ -143,27 +156,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Docker image
+      # ---------- Build & tag APP image ----------
+      - name: Build Docker image (app)
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           docker build -t "$IMAGE_LOCAL:$TAG" -t "$IMAGE_LOCAL:latest" .
-          # (Optionally tag GHCR for debugging)
           docker tag "$IMAGE_LOCAL:$TAG" "$IMAGE_GHCR:$TAG"
           docker tag "$IMAGE_LOCAL:latest" "$IMAGE_GHCR:latest"
 
-      # ---------- Deploy on team VM ----------
-      - name: Stop old container & cleanup
+      # ---------- Deploy APP on team VM ----------
+      - name: Stop old container & cleanup (app)
         run: |
           set -euxo pipefail
           docker rm -f "$CONTAINER_NAME" || true
           docker image prune -f || true
 
-      - name: Free host port 8080
+      - name: Free host port ${{ env.APP_PORT }} (app)
         run: |
           set -euxo pipefail
-          IN_USE=$(docker ps -q --filter "publish=8080")
+          IN_USE=$(docker ps -q --filter "publish=${APP_PORT}")
           if [ -n "$IN_USE" ]; then
-            echo "Killing containers using host port 8080: $IN_USE"
+            echo "Killing containers using host port ${APP_PORT}: $IN_USE"
             docker rm -f $IN_USE || true
           fi
 
@@ -173,7 +186,7 @@ jobs:
           mkdir -p integration
           [ -f "$EXPECTED_FILE" ] || echo "OK" > "$EXPECTED_FILE"
 
-      - name: Start container (detached, restart policy, named)
+      - name: Start container (app)
         run: |
           set -euxo pipefail
           docker run -d \
@@ -202,10 +215,8 @@ jobs:
         run: |
           set -e
           test -f "$EXPECTED_FILE" || { echo "Missing $EXPECTED_FILE"; exit 1; }
-
           EXPECTED="$(cat "$EXPECTED_FILE")"
           ACTUAL="$(curl -fsS "$HEALTH_URL")"
-
           if [ "$EXPECTED" = "$ACTUAL" ]; then
             echo "Integration test PASSED"
           else
@@ -217,27 +228,101 @@ jobs:
             exit 1
           fi
 
-      # ---------- Tag & Push only AFTER tests passed ----------
-      - name: Tag for team registry
+      # ---------- Build DOCS (MkDocs -> site) ----------
+      - name: Build docs (MkDocs Material via Docker)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euxo pipefail
+          test -f mkdocs.yml
+          test -d docs
+          docker run --rm -v "$PWD":/docs squidfunk/mkdocs-material:latest build --site-dir site
+          test -f site/index.html
+
+      # ---------- Build & run DOCS container (nginx) ----------
+      - name: Build docs container (nginx)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          docker build -f Dockerfile.docs -t "$IMAGE_LOCAL_DOCS:$TAG" -t "$IMAGE_LOCAL_DOCS:latest" .
+          docker tag "$IMAGE_LOCAL_DOCS:$TAG" "$IMAGE_GHCR_DOCS:$TAG"
+          docker tag "$IMAGE_LOCAL_DOCS:latest" "$IMAGE_GHCR_DOCS:latest"
+
+      - name: Stop old container & free port ${{ env.DOCS_HOST_PORT }} (docs)
+        run: |
+          set -euxo pipefail
+          docker rm -f "$DOCS_CONTAINER_NAME" || true
+          IN_USE=$(docker ps -q --filter "publish=${DOCS_HOST_PORT}")
+          if [ -n "$IN_USE" ]; then
+            echo "Killing containers using host port ${DOCS_HOST_PORT}: $IN_USE"
+            docker rm -f $IN_USE || true
+          fi
+
+      - name: Start docs container
+        run: |
+          set -euxo pipefail
+          docker run -d \
+            --name "$DOCS_CONTAINER_NAME" \
+            --restart unless-stopped \
+            -p "${DOCS_HOST_PORT}:80" \
+            "$IMAGE_LOCAL_DOCS:$TAG"
+
+      - name: Smoke test docs
+        run: |
+          set -e
+          echo "Waiting for ${DOCS_HEALTH_URL} ..."
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$DOCS_HEALTH_URL" || true)
+            if [ "$code" = "200" ]; then
+              echo "Docs are up."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Docs did not become ready in time."
+          exit 1
+
+      # ---------- Tag & Push APP after tests passed ----------
+      - name: Tag for team registry (app)
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           set -euxo pipefail
           docker tag "$IMAGE_LOCAL:$TAG"   "$IMAGE_TEAM:$TAG"
           docker tag "$IMAGE_LOCAL:latest" "$IMAGE_TEAM:latest"
 
-      - name: Push to team registry (insecure registry preconfigured)
+      - name: Push to team registry (app)
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           set -euxo pipefail
           docker push "$IMAGE_TEAM:$TAG"
           docker push "$IMAGE_TEAM:latest"
 
-      - name: Also push to GHCR (optional)
+      - name: Also push to GHCR (app)
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           set -euxo pipefail
           docker push "$IMAGE_GHCR:$TAG"
           docker push "$IMAGE_GHCR:latest"
+
+      # ---------- Tag & Push DOCS ----------
+      - name: Tag for team registry (docs)
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set -euxo pipefail
+          docker tag "$IMAGE_LOCAL_DOCS:$TAG"   "$IMAGE_TEAM_DOCS:$TAG"
+          docker tag "$IMAGE_LOCAL_DOCS:latest" "$IMAGE_TEAM_DOCS:latest"
+
+      - name: Push to team registry (docs)
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set -euxo pipefail
+          docker push "$IMAGE_TEAM_DOCS:$TAG"
+          docker push "$IMAGE_TEAM_DOCS:latest"
+
+      - name: Also push to GHCR (docs)
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set -euxo pipefail
+          docker push "$IMAGE_GHCR_DOCS:$TAG"
+          docker push "$IMAGE_GHCR_DOCS:latest"
 
       # ---------- Registry availability checks ----------
       - name: Verify repository appears in registry catalog
@@ -248,26 +333,38 @@ jobs:
           echo "$CATALOG"
           echo "$CATALOG" | grep -q "\"${REPO_LC}\"" \
             || { echo "Repo ${REPO_LC} not found in registry catalog"; exit 1; }
+          echo "$CATALOG" | grep -q "\"${REPO_LC}-docs\"" \
+            || { echo "Repo ${REPO_LC}-docs not found in registry catalog"; exit 1; }
 
-      - name: Verify pushed tags exist in registry
+      - name: Verify pushed tags exist in registry (app + docs)
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           set -euxo pipefail
-          TAGS_JSON="$(curl -fsS "http://${TEAM_REGISTRY}/v2/${REPO_LC}/tags/list")"
-          echo "$TAGS_JSON"
-          echo "$TAGS_JSON" | grep -q "\"${TAG}\"" \
-            || { echo "Tag ${TAG} not found in registry"; exit 1; }
-          echo "$TAGS_JSON" | grep -q "\"latest\"" \
-            || { echo "Tag latest not found in registry"; exit 1; }
+          TAGS_APP="$(curl -fsS "http://${TEAM_REGISTRY}/v2/${REPO_LC}/tags/list")"
+          echo "$TAGS_APP"
+          echo "$TAGS_APP" | grep -q "\"${TAG}\"" \
+            || { echo "Tag ${TAG} not found for app"; exit 1; }
+          echo "$TAGS_APP" | grep -q "\"latest\"" \
+            || { echo "Tag latest not found for app"; exit 1; }
+
+          TAGS_DOCS="$(curl -fsS "http://${TEAM_REGISTRY}/v2/${REPO_LC}-docs/tags/list")"
+          echo "$TAGS_DOCS"
+          echo "$TAGS_DOCS" | grep -q "\"${TAG}\"" \
+            || { echo "Tag ${TAG} not found for docs"; exit 1; }
+          echo "$TAGS_DOCS" | grep -q "\"latest\"" \
+            || { echo "Tag latest not found for docs"; exit 1; }
 
       # ---------- Helpful diagnostics & cleanup ----------
-      - name: Dump container logs on failure
+      - name: Dump app container logs on failure
         if: ${{ failure() }}
         run: |
           echo "==== Container logs (${CONTAINER_NAME}) ===="
           docker logs "$CONTAINER_NAME" || true
+          echo "==== Container logs (${DOCS_CONTAINER_NAME}) ===="
+          docker logs "$DOCS_CONTAINER_NAME" || true
 
-      - name: Stop container (always)
+      - name: Stop containers (always)
         if: ${{ always() }}
         run: |
           docker stop "$CONTAINER_NAME" || true
+          docker stop "$DOCS_CONTAINER_NAME" || true

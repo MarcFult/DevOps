@@ -1,0 +1,15 @@
+site_name: DevOps Project Docs
+site_description: Project documentation generated via MkDocs Material
+theme:
+  name: material
+nav:
+  - Home: index.md
+repo_name: DevOps Repository
+# If you have a repo URL, add it:
+# repo_url: https://github.com/<owner>/<repo>
+markdown_extensions:
+  - toc:
+      permalink: true
+  - admonition
+  - attr_list
+  - codehilite
