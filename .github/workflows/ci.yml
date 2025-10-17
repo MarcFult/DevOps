@@ -81,7 +81,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-        # (Gradle cache works off wrapper; optional to add)
 
       - name: Prepare Gradle user home
         run: |
@@ -255,11 +254,11 @@ jobs:
           test -f mkdocs.yml
           test -d docs
           docker run --rm \
-          --user "$(id -u):$(id -g)" \
-          -v "$PWD":/docs \
-          --entrypoint /bin/sh \
-          squidfunk/mkdocs-material:latest \
-          -c "chown -R $(id -u):$(id -g) /docs && mkdocs build --site-dir site"
+            --user "$(id -u):$(id -g)" \
+            -v "$PWD":/docs \
+            --entrypoint /bin/sh \
+            squidfunk/mkdocs-material:latest \
+            -c "chown -R $(id -u):$(id -g) /docs && mkdocs build --site-dir site"
           test -f site/index.html
 
       # ---------- Build & run DOCS container (nginx) ----------
@@ -269,6 +268,12 @@ jobs:
           docker build -f Dockerfile.docs -t "$IMAGE_LOCAL_DOCS:$TAG" -t "$IMAGE_LOCAL_DOCS:latest" .
           docker tag "$IMAGE_LOCAL_DOCS:$TAG" "$IMAGE_GHCR_DOCS:$TAG"
           docker tag "$IMAGE_LOCAL_DOCS:latest" "$IMAGE_GHCR_DOCS:latest"
+
+      # NEW: verify that index.html is actually inside the image
+      - name: Verify docs baked into image
+        run: |
+          set -eux
+          docker run --rm "$IMAGE_LOCAL_DOCS:$TAG" sh -c 'ls -la /usr/share/nginx/html && test -f /usr/share/nginx/html/index.html'
 
       - name: Stop old container & free port ${{ env.DOCS_HOST_PORT }} (docs)
         run: |
@@ -303,6 +308,15 @@ jobs:
           done
           echo "Docs did not become ready in time."
           exit 1
+
+      # Extra debug if anything fails after this point
+      - name: Debug docs container on failure
+        if: ${{ failure() }}
+        run: |
+          echo "=== Files inside running docs container ==="
+          docker exec "$DOCS_CONTAINER_NAME" sh -c 'ls -la /usr/share/nginx/html || true'
+          echo "=== Nginx error log (if present) ==="
+          docker exec "$DOCS_CONTAINER_NAME" sh -c 'cat /var/log/nginx/error.log || true'
 
       # ---------- Tag & Push APP after tests passed ----------
       - name: Tag for team registry (app)
