@@ -1,5 +1,4 @@
 # DevOps/DevOps/Dockerfile.docs
-FROM nginx:alpine
+FROM nginx
 # copy the MkDocs output folder created by the CI step:
 COPY site/ /usr/share/nginx/html
-EXPOSE 80
