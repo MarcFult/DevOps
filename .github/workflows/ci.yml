@@ -313,6 +313,15 @@ jobs:
           exit 1
           fi
 
+      - name: Verify MkDocs site
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          if [ ! -f site/index.html ]; then
+          echo "MkDocs did not generate site/index.html"
+          ls -la site
+          exit 1
+          fi
+
 
       # ---------- Tag & Push APP after tests passed ----------
       - name: Tag for team registry (app)
