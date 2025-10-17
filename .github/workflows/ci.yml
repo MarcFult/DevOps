@@ -34,7 +34,16 @@ jobs:
       DOCS_HEALTH_URL: "http://localhost:8081/index.html"
 
     steps:
+      # --- IMPORTANT: avoid checkout cleaning root-owned files from previous runs
       - uses: actions/checkout@v4
+        with:
+          clean: false
+          fetch-depth: 0
+
+      # One-time heal: remove any previous root-owned MkDocs output
+      - name: Cleanup previous root-owned site (one-time)
+        run: |
+          docker run --rm -v "$PWD":/ws alpine sh -c 'rm -rf /ws/DevOps/DevOps/site || true'
 
       - name: Show repo layout (debug)
         run: |
