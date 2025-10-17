@@ -239,7 +239,7 @@ jobs:
 
       # ---------- Build DOCS (MkDocs -> site) ----------
       - name: Clean site directory
-        run: sudo rm -rf site
+        run: sudo rm -rf site || true
         working-directory: ${{ env.PROJECT_DIR }}
       
       - name: Build docs (MkDocs Material via Docker)
@@ -249,10 +249,11 @@ jobs:
           test -f mkdocs.yml
           test -d docs
           docker run --rm \
-            -u "$(id -u):$(id -g)" \
-            -v "$PWD":/docs \
-            squidfunk/mkdocs-material:latest \
-            build --site-dir site
+          --user "$(id -u):$(id -g)" \
+          -v "$PWD":/docs \
+          --entrypoint /bin/sh \
+          squidfunk/mkdocs-material:latest \
+          -c "chown -R $(id -u):$(id -g) /docs && mkdocs build --site-dir site"
           test -f site/index.html
 
       # ---------- Build & run DOCS container (nginx) ----------
