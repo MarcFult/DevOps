@@ -238,6 +238,10 @@ jobs:
           fi
 
       # ---------- Build DOCS (MkDocs -> site) ----------
+      - name: Clean site directory
+        run: rm -rf site
+        working-directory: ${{ env.PROJECT_DIR }}
+      
       - name: Build docs (MkDocs Material via Docker)
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
