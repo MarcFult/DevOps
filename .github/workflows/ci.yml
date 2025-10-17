@@ -43,9 +43,9 @@ jobs:
           echo "PROJECT_DIR=${PROJECT_DIR}"
           ls -la "${PROJECT_DIR}" || true
           ls -la integration || true
-          ls -la docs || true
-          test -f mkdocs.yml && echo "mkdocs.yml present" || echo "mkdocs.yml missing"
-          test -f Dockerfile.docs && echo "Dockerfile.docs present" || echo "Dockerfile.docs missing"
+          ls -la "${PROJECT_DIR}/docs" || true
+          test -f "${PROJECT_DIR}/mkdocs.yml" && echo "mkdocs.yml present" || echo "mkdocs.yml missing"
+          test -f "${PROJECT_DIR}/Dockerfile.docs" && echo "Dockerfile.docs present" || echo "Dockerfile.docs missing"
 
       # Fail fast if Sonar secrets are missing (keeps values masked)
       - name: Validate Sonar secrets exist
@@ -235,7 +235,11 @@ jobs:
           set -euxo pipefail
           test -f mkdocs.yml
           test -d docs
-          docker run --rm -v "$PWD":/docs squidfunk/mkdocs-material:latest build --site-dir site
+          docker run --rm \
+            -u "$(id -u):$(id -g)" \
+            -v "$PWD":/docs \
+            squidfunk/mkdocs-material:latest \
+            build --site-dir site
           test -f site/index.html
 
       # ---------- Build & run DOCS container (nginx) ----------
