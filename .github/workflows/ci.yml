@@ -37,6 +37,7 @@ jobs:
       # --- IMPORTANT: avoid checkout cleaning root-owned files from previous runs
       - uses: actions/checkout@v4
         with:
+          path: DevOps
           clean: false
           fetch-depth: 0
 
