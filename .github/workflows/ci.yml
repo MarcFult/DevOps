@@ -318,6 +318,12 @@ jobs:
           echo "=== Nginx error log (if present) ==="
           docker exec "$DOCS_CONTAINER_NAME" sh -c 'cat /var/log/nginx/error.log || true'
 
+      - name: Check MkDocs site content
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "Files in site/:"
+          ls -la site/
+    
       # ---------- Tag & Push APP after tests passed ----------
       - name: Tag for team registry (app)
         if: ${{ github.event_name != 'pull_request' }}
