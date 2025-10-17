@@ -255,10 +255,11 @@ jobs:
           test -f mkdocs.yml
           test -d docs
           docker run --rm \
-            -u "$(id -u):$(id -g)" \
-            -v "$PWD":/docs \
-            squidfunk/mkdocs-material:latest \
-            build --site-dir site
+          --user "$(id -u):$(id -g)" \
+          -v "$PWD":/docs \
+          --entrypoint /bin/sh \
+          squidfunk/mkdocs-material:latest \
+          -c "chown -R $(id -u):$(id -g) /docs && mkdocs build --site-dir site"
           test -f site/index.html
 
       # ---------- Build & run DOCS container (nginx) ----------
