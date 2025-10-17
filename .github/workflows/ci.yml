@@ -16,15 +16,17 @@ jobs:
       id-token: write
 
     env:
-      PROJECT_DIR: DevOps/DevOps
+      # We checkout the repo into "repo/" to avoid the stale path that has root-owned files
+      REPO_ROOT: repo
+      PROJECT_DIR: repo/DevOps/DevOps
       GRADLE_USER_HOME: ${{ github.workspace }}/.gradle
 
       # ---- App coords ----
       SERVICE_NAME: devops-app
       CONTAINER_NAME: unicorn-fart
       APP_PORT: "8080"
-      HEALTH_URL: "http://localhost:8080/endpoint" # <-- Change if your endpoint differs
-      EXPECTED_FILE: "integration/expected.txt" # <-- Place expected output here
+      HEALTH_URL: "http://localhost:8080/endpoint"
+      EXPECTED_FILE: "integration/expected.txt"
 
       TEAM_REGISTRY: 10.0.40.193:5000
 
@@ -34,24 +36,29 @@ jobs:
       DOCS_HEALTH_URL: "http://localhost:8081/index.html"
 
     steps:
-      # --- IMPORTANT: avoid checkout cleaning root-owned files from previous runs
+      # Checkout into REPO_ROOT so checkout doesn't try to delete the old root-owned path
       - uses: actions/checkout@v4
         with:
+          path: ${{ env.REPO_ROOT }}
           clean: false
           fetch-depth: 0
 
-      # One-time heal: remove any previous root-owned MkDocs output
-      - name: Cleanup previous root-owned site (one-time)
+      # One-time heal (safe to keep): ensure everything under REPO_ROOT is owned by the runner
+      - name: Chown repo to runner user (once)
         run: |
-          docker run --rm -v "$PWD":/ws alpine sh -c 'rm -rf /ws/DevOps/DevOps/site || true'
+          docker run --rm \
+            -v "$PWD/${REPO_ROOT}":/project \
+            bash:latest chown --recursive $(id -u):$(id -g) /project
 
       - name: Show repo layout (debug)
         run: |
           pwd
           ls -la
+          echo "REPO_ROOT=${REPO_ROOT}"
           echo "PROJECT_DIR=${PROJECT_DIR}"
+          ls -la "${REPO_ROOT}" || true
           ls -la "${PROJECT_DIR}" || true
-          ls -la integration || true
+          ls -la "${REPO_ROOT}/integration" || true
           ls -la "${PROJECT_DIR}/docs" || true
           test -f "${PROJECT_DIR}/mkdocs.yml" && echo "mkdocs.yml present" || echo "mkdocs.yml missing"
           test -f "${PROJECT_DIR}/Dockerfile.docs" && echo "Dockerfile.docs present" || echo "Dockerfile.docs missing"
@@ -74,7 +81,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
+        # (Gradle cache works off wrapper; optional to add)
 
       - name: Prepare Gradle user home
         run: |
@@ -151,8 +158,6 @@ jobs:
           echo "IMAGE_LOCAL=${REPO_LC}" >> $GITHUB_ENV
           echo "TAG=${GITHUB_SHA}" >> $GITHUB_ENV
           echo "IMAGE_TEAM=${TEAM_REGISTRY}/${REPO_LC}" >> $GITHUB_ENV
-
-          # Docs image names (-docs suffix)
           echo "IMAGE_GHCR_DOCS=ghcr.io/${REPO_LC}-docs" >> $GITHUB_ENV
           echo "IMAGE_LOCAL_DOCS=${REPO_LC}-docs" >> $GITHUB_ENV
           echo "IMAGE_TEAM_DOCS=${TEAM_REGISTRY}/${REPO_LC}-docs" >> $GITHUB_ENV
@@ -189,8 +194,8 @@ jobs:
             docker rm -f $IN_USE || true
           fi
 
-      # Make sure the expected.txt exists (delete this step if you keep the file in repo)
       - name: Prepare test fixtures (expected.txt)
+        working-directory: ${{ env.REPO_ROOT }}
         run: |
           mkdir -p integration
           [ -f "$EXPECTED_FILE" ] || echo "OK" > "$EXPECTED_FILE"
@@ -221,6 +226,7 @@ jobs:
 
       # ---------- Simple integration test ----------
       - name: Integration test (compare endpoint to expected)
+        working-directory: ${{ env.REPO_ROOT }}
         run: |
           set -e
           test -f "$EXPECTED_FILE" || { echo "Missing $EXPECTED_FILE"; exit 1; }
@@ -239,9 +245,9 @@ jobs:
 
       # ---------- Build DOCS (MkDocs -> site) ----------
       - name: Clean site directory
-        run: rm -rf site
         working-directory: ${{ env.PROJECT_DIR }}
-      
+        run: rm -rf site
+
       - name: Build docs (MkDocs Material via Docker)
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
