@@ -387,8 +387,8 @@ jobs:
           echo "==== Container logs (${DOCS_CONTAINER_NAME}) ===="
           docker logs "$DOCS_CONTAINER_NAME" || true
 
-      - name: Stop containers (always)
-        if: ${{ always() }}
-        run: |
-          docker stop "$CONTAINER_NAME" || true
-          docker stop "$DOCS_CONTAINER_NAME" || true
+      #- name: Stop containers (always)
+        #if: ${{ always() }}
+        #run: |
+          #docker stop "$CONTAINER_NAME" || true
+          #docker stop "$DOCS_CONTAINER_NAME" || true
