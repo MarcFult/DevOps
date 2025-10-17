@@ -273,7 +273,7 @@ jobs:
       - name: Verify docs baked into image
         run: |
           set -eux
-          docker run --rm -p 8080:80 "$IMAGE_LOCAL_DOCS:$TAG"
+          docker run --rm -p 8081 "$IMAGE_LOCAL_DOCS:$TAG"
 
       - name: Stop old container & free port ${{ env.DOCS_HOST_PORT }} (docs)
         run: |
