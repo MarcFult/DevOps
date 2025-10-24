@@ -260,7 +260,27 @@ jobs:
             squidfunk/mkdocs-material:latest \
             -c "chown -R $(id -u):$(id -g) /docs && mkdocs build --site-dir site"
           test -f site/index.html
-
+          
+      # ------ Generate PDF from Mkdocs Site-------------------
+      - name: Generate PDF from MkDocs site
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euxo pipefail
+          # PDF im site-Verzeichnis generieren
+          docker run --rm \
+            -v "$PWD":/data \
+            pandoc/latex:latest \
+            -f html \
+            -t pdf \
+            -o /data/site/doc.pdf \
+            /data/site/index.html
+          
+      - name: Verify PDF exists in site directory
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          test -f site/doc.pdf || { echo "PDF not found!"; exit 1; }
+          echo "PDF file present in site directory."
+  
       # ---------- Build & run DOCS container (nginx) ----------
       - name: Build docs container (nginx)
         working-directory: ${{ env.PROJECT_DIR }}
@@ -303,27 +323,7 @@ jobs:
           done
           echo "Docs did not become ready in time."
           exit 1
-      # ------ Generate PDF from Mkdocs Site-------------------
-      - name: Generate PDF from MkDocs site
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          set -euxo pipefail
-          # PDF im site-Verzeichnis generieren
-          docker run --rm \
-            -v "$PWD":/data \
-            pandoc/latex:latest \
-            -f html \
-            -t pdf \
-            -o /data/site/doc.pdf \
-            /data/site/index.html
-          test -f site/doc.pdf && echo "PDF successfully generated."
-          
-      - name: Verify PDF exists in site directory
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          test -f site/doc.pdf || { echo "PDF not found!"; exit 1; }
-          echo "PDF file present in site directory."
-  
+
       # ---------- Tag & Push APP after tests passed ----------
       - name: Tag for team registry (app)
         if: ${{ github.event_name != 'pull_request' }}
