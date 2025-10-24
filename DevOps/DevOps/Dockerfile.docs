@@ -2,4 +2,3 @@
 FROM nginx
 # copy the MkDocs output folder created by the CI step:
 COPY site/ /usr/share/nginx/html
-COPY site/doc.pdf /usr/share/nginx/html/
