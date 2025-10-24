@@ -35,4 +35,3 @@ Sie läuft bei jedem Push oder Pull Request auf den Branch **main**.
 _)      \.___.,|     .'
 \____   )MMMMMP|   .'
      `-'       `--' hjm
-
