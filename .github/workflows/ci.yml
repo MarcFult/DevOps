@@ -303,7 +303,20 @@ jobs:
           done
           echo "Docs did not become ready in time."
           exit 1
-    
+      # ------ Generate PDF from Mkdocs Site-------------------
+      - name: Generate PDF from MkDocs site
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euxo pipefail
+          # PDF im site-Verzeichnis generieren
+          docker run --rm \
+            -v "$PWD":/data \
+            pandoc/latex:latest \
+            -f html \
+            -t pdf \
+            -o /data/site/doc.pdf \
+            /data/site/index.html
+          test -f site/doc.pdf && echo "PDF successfully generated."
       # ---------- Tag & Push APP after tests passed ----------
       - name: Tag for team registry (app)
         if: ${{ github.event_name != 'pull_request' }}
