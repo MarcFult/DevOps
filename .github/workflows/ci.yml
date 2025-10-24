@@ -321,7 +321,7 @@ jobs:
       - name: Verify PDF exists in site directory
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          test -f site/documentation.pdf || { echo "PDF not found!"; exit 1; }
+          test -f site/doc.pdf || { echo "PDF not found!"; exit 1; }
           echo "PDF file present in site directory."
   
       # ---------- Tag & Push APP after tests passed ----------
