@@ -437,7 +437,7 @@ jobs:
           echo "$SSH_KEY" > ~/.ssh/team_key
           chmod 600 ~/.ssh/team_key
 
-          # try to fetch host key, but DON'T fail the step if host is unreachable
+          #try to fetch host key, but DON'T fail the step if host is unreachable
           ssh-keyscan -p 22 -H "$TEAM_HOST" >> ~/.ssh/known_hosts || {
             echo "ssh-keyscan failed (host unreachable?) – continuing, SSH step may fail later."
           }
