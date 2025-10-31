@@ -456,7 +456,7 @@ jobs:
             set -euxo pipefail
             echo "== Team 3 deploy on \$(hostname) =="
 
-            #stop old containers if present
+            # stop old containers if present
             docker rm -f ${APP_CONTAINER} || true
             docker rm -f ${DOCS_CONTAINER} || true
 
