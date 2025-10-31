@@ -407,10 +407,10 @@ jobs:
           docker logs "$DOCS_CONTAINER_NAME" || true
 
       #- name: Stop containers (always)
-      #if: ${{ always() }}
-      #run: |
-      #docker stop "$CONTAINER_NAME" || true
-      #docker stop "$DOCS_CONTAINER_NAME" || true
+      #  if: ${{ always() }}
+      #  run: |
+      #    docker stop "$CONTAINER_NAME" || true
+      #    docker stop "$DOCS_CONTAINER_NAME" || true
 
   deploy-production:
     name: Deploy to Production (Team 3)
@@ -419,7 +419,7 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' }}
 
     env:
-      TEAM_HOST: 10.0.40.133 # 👈 adjust if your teacher gave another IP
+      TEAM_HOST: 10.0.40.133
       TEAM_USER: svcgithub
       APP_PORT: 1831 # Team 3 app port
       DOCS_PORT: 1832 # Team 3 docs port
@@ -436,7 +436,11 @@ jobs:
           mkdir -p ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/team_key
           chmod 600 ~/.ssh/team_key
-          ssh-keyscan -H "$TEAM_HOST" > ~/.ssh/known_hosts
+
+          # try to fetch host key, but DON'T fail the step if host is unreachable
+          ssh-keyscan -p 22 -H "$TEAM_HOST" >> ~/.ssh/known_hosts || {
+            echo "ssh-keyscan failed (host unreachable?) – continuing, SSH step may fail later."
+          }
 
       - name: Deploy app + docs on production
         env:
@@ -445,13 +449,18 @@ jobs:
           set -euxo pipefail
           REPO_LC=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
 
-          ssh -i ~/.ssh/team_key -o UserKnownHostsFile=~/.ssh/known_hosts "${TEAM_USER}@${TEAM_HOST}" bash <<EOF
+          ssh -i ~/.ssh/team_key \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o StrictHostKeyChecking=no \
+            "${TEAM_USER}@${TEAM_HOST}" bash <<EOF
             set -euxo pipefail
             echo "== Team 3 deploy on \$(hostname) =="
 
+            # stop old containers if present
             docker rm -f ${APP_CONTAINER} || true
             docker rm -f ${DOCS_CONTAINER} || true
 
+            # clean dangling images
             docker image prune -af || true
 
             echo "Pulling latest images from ${TEAM_REGISTRY} ..."
