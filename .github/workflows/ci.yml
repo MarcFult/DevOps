@@ -419,7 +419,7 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' }}
 
     env:
-      TEAM_HOST: 10.0.40.133
+      TEAM_HOST: 10.0.40.183
       TEAM_USER: svcgithub
       APP_PORT: 1831 # Team 3 app port
       DOCS_PORT: 1832 # Team 3 docs port
