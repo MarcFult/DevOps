@@ -177,7 +177,7 @@ jobs:
           docker tag "$IMAGE_LOCAL:$TAG" "$IMAGE_GHCR:$TAG"
           docker tag "$IMAGE_LOCAL:latest" "$IMAGE_GHCR:latest"
 
-      # ---------- Deploy APP on team VM ----------
+      # ---------- Deploy APP on team VM (local runner) ----------
       - name: Stop old container & cleanup (app)
         run: |
           set -euxo pipefail
@@ -260,13 +260,12 @@ jobs:
             squidfunk/mkdocs-material:latest \
             -c "chown -R $(id -u):$(id -g) /docs && mkdocs build --site-dir site"
           test -f site/index.html
-          
+
       # ------ Generate PDF from Mkdocs Site-------------------
       - name: Generate PDF from MkDocs site
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           set -euxo pipefail
-          # PDF im site-Verzeichnis generieren
           docker run --rm \
             -v "$PWD":/data \
             pandoc/latex:latest \
@@ -274,13 +273,13 @@ jobs:
             -t pdf \
             -o /data/site/doc.pdf \
             /data/site/index.html
-          
+
       - name: Verify PDF exists in site directory
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           test -f site/doc.pdf || { echo "PDF not found!"; exit 1; }
           echo "PDF file present in site directory."
-  
+
       # ---------- Build & run DOCS container (nginx) ----------
       - name: Build docs container (nginx)
         working-directory: ${{ env.PROJECT_DIR }}
@@ -408,7 +407,70 @@ jobs:
           docker logs "$DOCS_CONTAINER_NAME" || true
 
       #- name: Stop containers (always)
-        #if: ${{ always() }}
-        #run: |
-          #docker stop "$CONTAINER_NAME" || true
-          #docker stop "$DOCS_CONTAINER_NAME" || true
+      #if: ${{ always() }}
+      #run: |
+      #docker stop "$CONTAINER_NAME" || true
+      #docker stop "$DOCS_CONTAINER_NAME" || true
+
+  deploy-production:
+    name: Deploy to Production (Team 3)
+    runs-on: self-hosted
+    needs: build-test-docker
+    if: ${{ github.ref == 'refs/heads/main' }}
+
+    env:
+      TEAM_HOST: 10.0.40.133 # 👈 adjust if your teacher gave another IP
+      TEAM_USER: svcgithub
+      APP_PORT: 1831 # Team 3 app port
+      DOCS_PORT: 1832 # Team 3 docs port
+      APP_CONTAINER: devops-app
+      DOCS_CONTAINER: devops-docs
+      TEAM_REGISTRY: 10.0.40.193:5000
+
+    steps:
+      - name: Prepare SSH key & known_hosts
+        env:
+          SSH_KEY: ${{ secrets.TEAM_PRIVATE_KEY }}
+        run: |
+          set -euxo pipefail
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/team_key
+          chmod 600 ~/.ssh/team_key
+          ssh-keyscan -H "$TEAM_HOST" > ~/.ssh/known_hosts
+
+      - name: Deploy app + docs on production
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euxo pipefail
+          REPO_LC=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+
+          ssh -i ~/.ssh/team_key -o UserKnownHostsFile=~/.ssh/known_hosts "${TEAM_USER}@${TEAM_HOST}" bash <<EOF
+            set -euxo pipefail
+            echo "== Team 3 deploy on \$(hostname) =="
+
+            docker rm -f ${APP_CONTAINER} || true
+            docker rm -f ${DOCS_CONTAINER} || true
+
+            docker image prune -af || true
+
+            echo "Pulling latest images from ${TEAM_REGISTRY} ..."
+            docker pull ${TEAM_REGISTRY}/${REPO_LC}:latest
+            docker pull ${TEAM_REGISTRY}/${REPO_LC}-docs:latest
+
+            echo "Starting APP on port ${APP_PORT} ..."
+            docker run -d \
+              --restart always \
+              --name ${APP_CONTAINER} \
+              -p ${APP_PORT}:8080 \
+              ${TEAM_REGISTRY}/${REPO_LC}:latest
+
+            echo "Starting DOCS on port ${DOCS_PORT} ..."
+            docker run -d \
+              --restart always \
+              --name ${DOCS_CONTAINER} \
+              -p ${DOCS_PORT}:80 \
+              ${TEAM_REGISTRY}/${REPO_LC}-docs:latest
+
+            echo "Deployment finished: app -> ${APP_PORT}, docs -> ${DOCS_PORT}"
+          EOF
